@@ -1,0 +1,104 @@
+services:
+  # -------------------------------------------------------------------
+  # APACHE KAFKA (Message Broker - Mode KRaft sans Zookeeper)
+  # -------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: analytics-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=controller,broker
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_LISTENERS=INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  # UI pour Kafka (Interface graphique indispensable pour observer les messages)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: analytics-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local-cluster
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092
+    depends_on:
+      - kafka
+
+  # -------------------------------------------------------------------
+  # CLICKHOUSE (Base de données analytique OLAP)
+  # -------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: analytics-clickhouse
+    ports:
+      - "8123:8123" # Port d'interface HTTP
+      - "9000:9000" # Port natif utilisé par le driver Java / Spring
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # -------------------------------------------------------------------
+  # REDIS (Base de données en mémoire pour le Live)
+  # -------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: analytics-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # -------------------------------------------------------------------
+  # INGESTION SERVICE
+  # -------------------------------------------------------------------
+  ingestion-service:
+    build:
+      context: ./ingestion-service
+      # dockerfile: Dockerfile
+    container_name: analytics-ingestion-service
+    ports:
+      - "8081:8080" # Port pour l'API REST externe
+    environment:
+      - SPRING_KAFKA_BOOTSTRAPSERVERS=kafka:29092
+      - KAFKA_CONSUMER_GROUP_ID=clickhouse-ingestion-group
+      - KAFKA_TOPIC=web-events
+    depends_on:
+      - kafka
+
+  # -------------------------------------------------------------------
+  # QUERY SERVICE
+  # -------------------------------------------------------------------
+  query-service:
+    build:
+      context: ./query-service
+      # dockerfile: Dockerfile
+    container_name: analytics-query-service
+    ports:
+      - "8082:8080" # Port pour l'API REST externe
+    environment:
+      - SPRING_KAFKA_BOOTSTRAPSERVERS=kafka:29092
+      - KAFKA_CONSUMER_GROUP_ID=clickhouse-aggregation-group
+      - KAFKA_TOPIC=web-events
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+    depends_on:
+      - kafka
+      - redis
+
+volumes:
+  kafka_data:
+    driver: local
+  clickhouse_data:
+    driver: local
+  redis_data:
+    driver: local

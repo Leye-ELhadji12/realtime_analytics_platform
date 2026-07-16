@@ -1,0 +1,10 @@
+services:
+  # -------------------------------------------------------------------
+  # FRONTEND (Angular UI)
+  # -------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+    container_name: analytics-frontend
+    ports:
+      - "4200:80" # On expose le port 4200 (classique pour Angular) mappé sur le 80 (Nginx)
